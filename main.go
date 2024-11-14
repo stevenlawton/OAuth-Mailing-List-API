@@ -45,7 +45,9 @@ var (
 	mailgunListAddress string
 	mailgunListAPIKey  string
 
-	secretKey string
+	secretKey  string
+	port       string
+	corsOrigin string
 )
 
 func setup() {
@@ -87,6 +89,18 @@ func setup() {
 		log.Printf("Secret key not set")
 	}
 
+	port = os.Getenv("PORT")
+	if port == "" {
+		log.Printf("port not set (defaulting to 3000)")
+		port = "3000"
+	}
+
+	corsOrigin = os.Getenv("CORS_ORIGIN")
+	if corsOrigin == "" {
+		log.Printf("cors Origin not set (defaulting to 3000)")
+		corsOrigin = "*"
+	}
+
 }
 
 func main() {
@@ -97,17 +111,11 @@ func main() {
 	http.HandleFunc("/api/oauth/facebook", handleOAuthFacebook)
 	http.HandleFunc("/api/verify", handleSignupVerify)
 
-	// Set up CORS middleware
 	c := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"}, // Allow all origins for simplicity, adjust as needed
+		AllowedOrigins: []string{corsOrigin},
 		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
 		AllowedHeaders: []string{"Authorization", "Content-Type"},
 	})
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "3000" // Default port if not specified
-	}
 
 	handler := c.Handler(http.DefaultServeMux)
 
