@@ -3,7 +3,7 @@ services:
     image: stevenlawton/mailing-list-backend:latest
     restart: always
     ports:
-      - "3000:3000"
+      - "30003:3000"
     env_file:
       - .env
     entrypoint: ["/mailing-list-backend"]

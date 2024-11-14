@@ -13,14 +13,8 @@ COPY . .
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o mailing-list-backend
 
-# Stage 2: Run unit tests
-#FROM builder AS tester
-
-# Run tests
-#RUN go test -v ./...
-
 # Stage 3: Run the application in a minimal container
-FROM scratch AS runner
+FROM golang:alpine3.20 AS runner
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
