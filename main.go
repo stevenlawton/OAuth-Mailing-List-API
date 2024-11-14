@@ -62,11 +62,11 @@ var (
 func setup() {
 	currentDir, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("FATAL: Failed to get current directory: %v", err)
+		log.Printf("FATAL: Failed to get current directory: %v", err)
 	}
 
 	if err := godotenv.Load(currentDir + "/.env"); err != nil {
-		log.Fatalf("FATAL: No .env file found")
+		log.Println("FATAL: No .env file found")
 	} else {
 		log.Println("INFO: .env file loaded successfully")
 	}
