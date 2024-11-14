@@ -9,6 +9,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/mailgun/mailgun-go/v4"
 	"github.com/rs/cors"
+	"github.com/stevenlawton/go-telegram-alert"
 	"io"
 	"log"
 	"net/http"
@@ -49,6 +50,9 @@ var (
 	welcomeEmailTemplateName       string
 	welcomeEmailTemplateSubject    string
 
+	loggingBotToken string
+	loggingBotChat  int64
+
 	secretKey  string
 	baseURL    string
 	port       string
@@ -58,86 +62,99 @@ var (
 func setup() {
 	currentDir, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("Failed to get current directory: %v", err)
+		log.Fatalf("FATAL: Failed to get current directory: %v", err)
 	}
-	log.Printf("Current Directory: %s", currentDir)
 
-	// Load environment variables from .env file
 	if err := godotenv.Load(currentDir + "/.env"); err != nil {
-		log.Fatalf("No .env file found")
+		log.Fatalf("FATAL: No .env file found")
 	} else {
-		log.Println(".env file loaded successfully")
+		log.Println("INFO: .env file loaded successfully")
 	}
 
 	mailgunAPIKey = os.Getenv("MAILGUN_MAILING_LIST_API_KEY")
 	if mailgunAPIKey == "" {
-		log.Printf("Mailgun API key not set")
+		log.Fatalf("Mailgun API key not set")
 	}
 
 	mailgunListAPIKey = os.Getenv("MAILGUN_MAILING_LIST_API_KEY")
 	if mailgunListAPIKey == "" {
-		log.Printf("Mailgun list API key not set")
+		log.Fatalf("FATAL: Mailgun list API key not set")
 	}
 
 	mailgunDomain = os.Getenv("MAILGUN_DOMAIN")
 	if mailgunDomain == "" {
-		log.Printf("Mailgun domain not set")
+		log.Fatalf("FATAL: Mailgun domain not set")
 	}
 
 	mailgunListAddress = os.Getenv("MAILGUN_LIST_ADDRESS")
 	if mailgunListAddress == "" {
-		log.Printf("Mailgun list address not set")
+		log.Fatalf("FATAL: Mailgun list address not set")
 	}
 
 	mailgunSender = os.Getenv("MAILGUN_SENDER")
 	if mailgunSender == "" {
-		log.Printf("Mailgun sender not set")
+		log.Fatalf("FATAL: Mailgun sender not set")
 	}
 
 	mailgunSubjectPrefix = os.Getenv("MAILGUN_SUBJECT_PREFIX")
 	if mailgunSubjectPrefix == "" {
-		log.Printf("Mailgun subject prefix not set")
+		log.Fatalf("FATAL: Mailgun subject prefix not set")
 	}
 
 	validationEmailTemplateName = os.Getenv("VALIDATION_EMAIL_TEMPLATE")
 	if validationEmailTemplateName == "" {
-		log.Printf("Validation email template name not set")
+		log.Fatalf("FATAL: Validation email template name not set")
 	}
 
 	validationEmailTemplateSubject = os.Getenv("VALIDATION_EMAIL_TEMPLATE_SUBJECT")
 	if validationEmailTemplateName == "" {
-		log.Printf("Validation email template subject not set")
+		log.Fatalf("FATAL: Validation email template subject not set")
 	}
 
 	welcomeEmailTemplateName = os.Getenv("WELCOME_EMAIL_TEMPLATE")
 	if welcomeEmailTemplateName == "" {
-		log.Printf("Welcome email template name not set")
+		log.Fatalf("FATAL: Welcome email template name not set")
 	}
 
 	welcomeEmailTemplateSubject = os.Getenv("WELCOME_EMAIL_TEMPLATE_SUBJECT")
 	if welcomeEmailTemplateSubject == "" {
-		log.Printf("Welcome email template subject not set")
+		log.Fatalf("FATAL: Welcome email template subject not set")
+	}
+
+	loggingBotToken = os.Getenv("LOGGING_BOT_TOKEN")
+	if loggingBotToken == "" {
+		log.Fatalf("FATAL: Logging bot token not set")
+	}
+
+	loggingBotChatStr := os.Getenv("LOGGING_BOT_CHAT")
+	if loggingBotChatStr == "" {
+		log.Printf("INFO: Logging bot chat not set")
+	} else {
+		loggingBotChat, err = strconv.ParseInt(loggingBotChatStr, 10, 64)
+		if err != nil {
+			log.Printf("INFO: Logging bot chat not valid")
+		}
 	}
 
 	secretKey = os.Getenv("SECRET_KEY")
 	if secretKey == "" {
-		log.Printf("Secret key not set")
+		log.Fatalf("FATAL: Secret key not set")
 	}
 
 	baseURL = os.Getenv("BASE_URL")
 	if baseURL == "" {
-		log.Printf("Base URL not set")
+		log.Fatalf("FATAL: Base URL not set")
 	}
 
 	port = os.Getenv("PORT")
 	if port == "" {
-		log.Printf("port not set (defaulting to 3000)")
 		port = "3000"
+		log.Fatalf("FATAL: port not set (defaulting to 3000)")
 	}
 
 	corsOrigin = os.Getenv("CORS_ORIGIN")
 	if corsOrigin == "" {
-		log.Printf("cors Origin not set (defaulting to 3000)")
+		log.Printf("INFO: cors Origin not set (defaulting to 3000)")
 		corsOrigin = "*"
 	}
 
@@ -145,6 +162,11 @@ func setup() {
 
 func main() {
 	setup()
+
+	err := gotelalert.NewTeleLogger(loggingBotToken, loggingBotChat)
+	if err != nil {
+		log.Fatalf("FATAL: Failed to create TeleLogger: %v", err)
+	}
 
 	http.HandleFunc("/api/signup", handleSignup)
 	http.HandleFunc("/api/verify", handleSignupVerify)
@@ -159,9 +181,9 @@ func main() {
 
 	handler := c.Handler(http.DefaultServeMux)
 
-	log.Printf("Server starting on port %s...", port)
+	log.Printf("INFO: Server starting on port %s...", port)
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+		log.Fatalf("FATAL: Failed to start server: %v", err)
 	}
 }
 
@@ -177,29 +199,27 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
-
 	var signupReq SignupRequest
 	if err := json.NewDecoder(r.Body).Decode(&signupReq); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-
-	log.Printf("Received signup request for email: %s", signupReq.Email)
+	log.Printf("INFO: Received signup request for email: %s", signupReq.Email)
 	if !isOnMailingList(r.Context(), signupReq.Email) {
 		value := fmt.Sprintf(`%s:%s/api/verify?token=%s&email=%s`, baseURL, port, calculateToken(signupReq.Email), signupReq.Email)
 		params := map[string]string{
 			"validation_email_link": value,
 		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 		defer cancel()
-
 		err := sendTemplateEmail(ctx, validationEmailTemplateName, validationEmailTemplateSubject, signupReq.Email, params)
 		if err != nil {
+			log.Printf("ERROR: failed to send template email: %s to %s [%v] :: %v", validationEmailTemplateName, signupReq.Email, params, err)
 			http.Error(w, "send Template Email error", http.StatusBadRequest)
 			return
 		}
 	}
+	log.Printf("INFO: Email verification started request for email: %s", signupReq.Email)
 	_, err := w.Write([]byte(`{"status":"ok"}`))
 	if err != nil {
 		return
@@ -213,10 +233,12 @@ func handleSignupVerify(w http.ResponseWriter, r *http.Request) {
 	if token == calculateToken(email) {
 		err := doMailingListSignUp(r.Context(), email, "")
 		if err != nil {
+			log.Printf("ERROR: failed to send email to %s :: %v", email, err)
 			http.Error(w, "send Mailing List Email error", http.StatusBadRequest)
 			return
 		}
 	}
+	log.Printf("INFO: Email verification completed request for email: %s", email)
 	_, err := w.Write([]byte(`{"status":"ok"}`))
 	if err != nil {
 		return
@@ -225,29 +247,26 @@ func handleSignupVerify(w http.ResponseWriter, r *http.Request) {
 
 func handleOAuthGoogle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		log.Println("Invalid request method")
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
-
 	var oauthReq OAuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&oauthReq); err != nil {
-		log.Println("Invalid request body")
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-
 	data, err := getGoogleData(oauthReq)
 	if err != nil {
+		http.Error(w, "failed to get google data", http.StatusBadRequest)
 		return
 	}
-
 	err = doMailingListSignUp(r.Context(), data.Email, data.Name)
 	if err != nil {
+		log.Printf("ERROR: (google) failed to send email to %s :: %v", data.Email, err)
 		http.Error(w, "send Mailing List Email error", http.StatusBadRequest)
 		return
 	}
-
+	log.Printf("INFO: (google) email added: %s", data.Email)
 	_, err = w.Write([]byte(`{"status":"ok"}`))
 	if err != nil {
 		return
@@ -318,27 +337,23 @@ func handleOAuthFacebook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
-
 	var oauthReq OAuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&oauthReq); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-
 	userInfo, err := getFBData(oauthReq)
 	if err != nil {
-		log.Printf("error getting FB data : %v", err)
 		http.Error(w, "error getting FB data", http.StatusInternalServerError)
 		return
 	}
-
 	err = doMailingListSignUp(r.Context(), userInfo.Email, userInfo.Name)
 	if err != nil {
-		log.Printf("send Mailing List Email error for %s : %v", userInfo.Email, err)
+		log.Printf("ERROR: (fb) failed to send email to %s :: %v", userInfo.Email, err)
 		http.Error(w, "send Mailing List Email error", http.StatusBadRequest)
 		return
 	}
-
+	log.Printf("INFO: (FB) email added: %s", userInfo.Email)
 	_, err = w.Write([]byte(`{"status":"ok"}`))
 	if err != nil {
 		return
@@ -393,7 +408,6 @@ func sendTemplateEmail(ctx context.Context, template string, subject string, to 
 	if err != nil {
 		return err
 	}
-
 	message := mailgun.NewMessage(mailgunSender, mailgunSubjectPrefix+subject, "", to)
 	message.SetTemplate(t.Name)
 	if variables != nil {
@@ -404,22 +418,19 @@ func sendTemplateEmail(ctx context.Context, template string, subject string, to 
 			}
 		}
 	}
-
-	msg, id, err := mg.Send(ctx, message)
+	_, _, err = mg.Send(ctx, message)
 	if err != nil {
 		return err
 	}
-	log.Printf("%s -> msg: %s", id, msg)
 	return nil
 }
 
 func isOnMailingList(ctx context.Context, email string) bool {
 	mg := mailgun.NewMailgun(mailgunDomain, mailgunListAPIKey)
-	member, err := mg.GetMember(ctx, email, mailgunListAddress)
+	_, err := mg.GetMember(ctx, email, mailgunListAddress)
 	if err != nil {
 		return false
 	}
-	log.Printf("Got member: %v", member)
 	return true
 }
 
@@ -434,7 +445,6 @@ func addToMailingList(ctx context.Context, email string, name string) error {
 	if err != nil {
 		return err
 	}
-
-	log.Printf("Successfully added %s to the mailing list %s", email, mailgunListAddress)
+	log.Printf("INFO: Successfully added %s to the mailing list %s", email, mailgunListAddress)
 	return nil
 }
