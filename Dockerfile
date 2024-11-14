@@ -18,9 +18,13 @@ FROM golang:alpine3.20 AS runner
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
-WORKDIR /bin/
+WORKDIR /app
+
 # Copy executable from builder
-COPY --from=builder /app/mailing-list-backend ./mailing-list-backend
+COPY --from=builder /app/mailing-list-backend .
+
+# Set executable permissions (just in case)
+RUN chmod +x mailing-list-backend
 
 # Run the application
 ENTRYPOINT ["./mailing-list-backend"]
