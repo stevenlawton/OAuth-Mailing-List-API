@@ -7,10 +7,12 @@ This project is a Go-based web application that allows users to sign up for a ma
 - **Email Verification**: Generates a token and sends a verification link to ensure email validity before adding users to the mailing list.
 - **Mailgun Integration**: Uses Mailgun for sending verification emails and managing mailing lists.
 - **CORS Support**: Supports Cross-Origin Resource Sharing (CORS) for API access from different domains.
+- **Dockerized Workflow**: Uses a multi-stage Dockerfile for building, testing, and running the application efficiently.
 
 ## Prerequisites
 - **Go**: Ensure you have Go installed (version 1.17 or above).
 - **Mailgun Account**: You need an account and API key from Mailgun for email sending functionality.
+- - 2 templates setup welcome email and validation email 
 - **Facebook and Google OAuth Credentials**: Set up applications on Facebook and Google Developer Consoles to obtain API credentials.
 - **Environment Variables**: Use a `.env` file or environment variables for sensitive information like API keys and OAuth credentials.
 
@@ -24,12 +26,28 @@ This project is a Go-based web application that allows users to sign up for a ma
 
 ### Example `.env` file
 ```env
-MAILGUN_API_KEY=your_mailgun_api_key_here
-MAILGUN_LIST_ADDRESS=mailinglist@mail.stevenlawton.com
-SECRET_KEY=your_secret_key_here
-MAILGUN_MAILING_LIST_API_KEY=your_mailgun_mailing_list_api_key_here
-MAILGUN_DOMAIN=mail.stevenlawton.com
+MAILGUN_API_KEY=1234
+MAILGUN_MAILING_LIST_API_KEY=1234
+
+MAILGUN_DOMAIN=mail.example.com
+MAILGUN_LIST_ADDRESS=mailinglist@mail.example.com
+MAILGUN_SENDER='example.com <mailinglist@mail.example.com>'
+MAILGUN_SUBJECT_PREFIX='example.com: '
+
+VALIDATION_EMAIL_TEMPLATE='email validation'
+VALIDATION_EMAIL_TEMPLATE_SUBJECT='Email Signup Validation'
+
+WELCOME_EMAIL_TEMPLATE='welcome email'
+WELCOME_EMAIL_TEMPLATE_SUBJECT='Welcome to Our Community'
+
+BASE_URL=http://localhost
 PORT=3000
+CORS_ORIGIN=*
+
+LOGGING_BOT_TOKEN=1234
+LOGGING_BOT_CHAT=-1
+
+SECRET_KEY=12345
 ```
 
 ## Running the Project
@@ -49,6 +67,21 @@ go run main.go
 ```
 
 The server should start on the port defined in your `.env` file (default: 3000).
+
+### Running with Docker
+You can build, test, and run the application using Docker.
+
+1. **Build and Test**: The provided Dockerfile has a multi-stage setup to build, test, and finally package the application.
+
+   ```sh
+   docker build -t mailing-list-backend .
+   ```
+
+2. **Run**: After building, you can run the application in a minimal container.
+
+   ```sh
+   docker run -p 3000:3000 mailing-list-backend
+   ```
 
 ## API Endpoints
 
@@ -70,8 +103,8 @@ Handles Facebook OAuth sign-up.
 ### 4. `/api/verify` (GET)
 Verifies user email using a token.
 - **Query Parameters**:
-    - `token`: The verification token.
-    - `email`: The email address to verify.
+  - `token`: The verification token.
+  - `email`: The email address to verify.
 - **Response**: Adds the user to the mailing list if the token is valid.
 
 ## Code Overview
@@ -83,7 +116,7 @@ Verifies user email using a token.
 - **`handleSignupVerify()`**: Verifies the user's email using a token.
 
 ### Helper Functions
-- **`sendEmail()`**: Uses Mailgun to send emails.
+- **`sendTemplateEmail()`**: Uses Mailgun to send emails based on a template.
 - **`addToMailingList()`**: Adds a verified user to the Mailgun mailing list.
 - **`calculateToken()`**: Generates a verification token based on a secret key, email, and the current week.
 - **`isOnMailingList()`**: Checks whether the user is already on the mailing list.
@@ -91,6 +124,11 @@ Verifies user email using a token.
 ## Development Notes
 - **Testing OAuth Handlers**: When testing OAuth endpoints, ensure you provide valid Google and Facebook tokens to get meaningful responses.
 - **Mailgun**: Ensure you have the correct permissions for the API keys to access the necessary Mailgun features.
+- **Unit Testing**: The project includes unit tests for key handlers such as `handleSignup()`, `handleSignupVerify()`, and `handleOAuthGoogle()`. Run tests using the following command:
+
+  ```sh
+  go test -v ./...
+  ```
 
 ## Example Usage
 To sign up with an email, make a `POST` request to `/api/signup`:
@@ -105,6 +143,7 @@ To verify the signup, the user needs to click the link sent to their email which
 - **Environment Variables Missing**: Ensure all required variables are set in the `.env` file.
 - **CORS Issues**: If CORS issues arise, consider adding allowed origins explicitly.
 - **Mailgun Authorization**: Check if your Mailgun API keys are correct and authorized for your domain.
+- **OAuth Token Validation**: Ensure that the tokens provided are valid and that you have permissions set up on your Google and Facebook apps.
 
 ## License
 This project is licensed under the MIT License.
