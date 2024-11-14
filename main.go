@@ -237,12 +237,15 @@ func handleSignupVerify(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "send Mailing List Email error", http.StatusBadRequest)
 			return
 		}
-	}
-	log.Printf("INFO: Email verification completed request for email: %s", email)
-	_, err := w.Write([]byte(`{"status":"ok"}`))
-	if err != nil {
+
+		log.Printf("INFO: Email verification completed request for email: %s", email)
+		_, err = w.Write([]byte(`{"status":"ok"}`))
+		if err != nil {
+			return
+		}
 		return
 	}
+	http.Error(w, "Invalid request", http.StatusBadRequest)
 }
 
 func handleOAuthGoogle(w http.ResponseWriter, r *http.Request) {
