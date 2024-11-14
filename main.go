@@ -170,6 +170,12 @@ func main() {
 	http.HandleFunc("/api/oauth/google", handleOAuthGoogle)
 	http.HandleFunc("/api/oauth/facebook", handleOAuthFacebook)
 
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("Received a request to root path")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Hello, this is the Go server response."))
+	})
+
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{corsOrigin},
 		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
