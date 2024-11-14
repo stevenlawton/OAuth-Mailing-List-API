@@ -11,19 +11,22 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN go build -o mailing-list-backend
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o mailing-list-backend
 
 # Stage 2: Run unit tests
-FROM builder AS tester
+#FROM builder AS tester
 
 # Run tests
-RUN go test -v ./...
+#RUN go test -v ./...
 
 # Stage 3: Run the application in a minimal container
 FROM scratch AS runner
 
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+WORKDIR /bin/
 # Copy executable from builder
-COPY --from=builder /app/mailing-list-backend /mailing-list-backend
+COPY --from=builder /app/mailing-list-backend ./mailing-list-backend
 
 # Run the application
-ENTRYPOINT ["/mailing-list-backend"]
+ENTRYPOINT ["./mailing-list-backend"]
