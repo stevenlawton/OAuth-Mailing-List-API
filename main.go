@@ -10,7 +10,6 @@ import (
 	"github.com/mailgun/mailgun-go/v4"
 	"github.com/rs/cors"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -40,12 +39,20 @@ type OAuthResponse struct {
 }
 
 var (
-	mailgunAPIKey      string
-	mailgunDomain      string
-	mailgunListAddress string
-	mailgunListAPIKey  string
+	mailgunAPIKey        string
+	mailgunDomain        string
+	mailgunListAddress   string
+	mailgunListAPIKey    string
+	mailgunSender        string
+	mailgunSubjectPrefix string
+
+	validationEmailTemplateName    string
+	validationEmailTemplateSubject string
+	welcomeEmailTemplateName       string
+	welcomeEmailTemplateSubject    string
 
 	secretKey  string
+	baseURL    string
 	port       string
 	corsOrigin string
 )
@@ -84,9 +91,44 @@ func setup() {
 		log.Printf("Mailgun list address not set")
 	}
 
+	mailgunSender = os.Getenv("MAILGUN_SENDER")
+	if mailgunSender == "" {
+		log.Printf("Mailgun sender not set")
+	}
+
+	mailgunSubjectPrefix = os.Getenv("MAILGUN_SUBJECT_PREFIX")
+	if mailgunSubjectPrefix == "" {
+		log.Printf("Mailgun subject prefix not set")
+	}
+
+	validationEmailTemplateName = os.Getenv("VALIDATION_EMAIL_TEMPLATE")
+	if validationEmailTemplateName == "" {
+		log.Printf("Validation email template name not set")
+	}
+
+	validationEmailTemplateSubject = os.Getenv("VALIDATION_EMAIL_TEMPLATE_SUBJECT")
+	if validationEmailTemplateName == "" {
+		log.Printf("Validation email template subject not set")
+	}
+
+	welcomeEmailTemplateName = os.Getenv("WELCOME_EMAIL_TEMPLATE")
+	if welcomeEmailTemplateName == "" {
+		log.Printf("Welcome email template name not set")
+	}
+
+	welcomeEmailTemplateSubject = os.Getenv("WELCOME_EMAIL_TEMPLATE_SUBJECT")
+	if welcomeEmailTemplateSubject == "" {
+		log.Printf("Welcome email template subject not set")
+	}
+
 	secretKey = os.Getenv("SECRET_KEY")
 	if secretKey == "" {
 		log.Printf("Secret key not set")
+	}
+
+	baseURL = os.Getenv("BASE_URL")
+	if baseURL == "" {
+		log.Printf("Base URL not set")
 	}
 
 	port = os.Getenv("PORT")
@@ -107,9 +149,9 @@ func main() {
 	setup()
 
 	http.HandleFunc("/api/signup", handleSignup)
+	http.HandleFunc("/api/verify", handleSignupVerify)
 	http.HandleFunc("/api/oauth/google", handleOAuthGoogle)
 	http.HandleFunc("/api/oauth/facebook", handleOAuthFacebook)
-	http.HandleFunc("/api/verify", handleSignupVerify)
 
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{corsOrigin},
@@ -123,20 +165,6 @@ func main() {
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
-}
-
-func handleSignupVerify(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("token")
-	email := r.URL.Query().Get("email")
-
-	if token == calculateToken(email) {
-		subject := "Welcome to the list"
-		text := "Welcome to our mailing list! Here is your link to the pattern library: http://example.com/pattern-library"
-		sendEmail(r.Context(), email, subject, text)
-		addToMailingList(r.Context(), email, "")
-	}
-
-	w.Write([]byte(`{"status":"ok"}`))
 }
 
 func calculateToken(email string) string {
@@ -159,14 +187,42 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("Received signup request for email: %s", signupReq.Email)
+	if !isOnMailingList(r.Context(), signupReq.Email) {
+		value := fmt.Sprintf(`%s/verify?token=%s&email=%s`, baseURL, calculateToken(signupReq.Email), signupReq.Email)
+		params := map[string]string{
+			"validation_email_link": value,
+		}
 
-	// Send verification email
-	subject := "Verify your email address"
-	text := fmt.Sprintf("Please verify your email by clicking the link: http://localhost:3000/verify?token=%s&email=%s", calculateToken(signupReq.Email), signupReq.Email)
-	sendEmail(r.Context(), signupReq.Email, subject, text)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		defer cancel()
 
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Signup successful. Please check your email to verify your address."))
+		err := sendTemplateEmail(ctx, validationEmailTemplateName, validationEmailTemplateSubject, signupReq.Email, params)
+		if err != nil {
+			http.Error(w, "send Template Email error", http.StatusBadRequest)
+			return
+		}
+	}
+	_, err := w.Write([]byte(`{"status":"ok"}`))
+	if err != nil {
+		return
+	}
+}
+
+func handleSignupVerify(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	email := r.URL.Query().Get("email")
+
+	if token == calculateToken(email) {
+		err := doMailingListSignUp(r.Context(), email, "")
+		if err != nil {
+			http.Error(w, "send Mailing List Email error", http.StatusBadRequest)
+			return
+		}
+	}
+	_, err := w.Write([]byte(`{"status":"ok"}`))
+	if err != nil {
+		return
+	}
 }
 
 func handleOAuthGoogle(w http.ResponseWriter, r *http.Request) {
@@ -183,49 +239,80 @@ func handleOAuthGoogle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Received Google OAuth token: %s", oauthReq.Token)
+	data, err := getGoogleData(oauthReq)
+	if err != nil {
+		return
+	}
 
+	err = doMailingListSignUp(r.Context(), data.Email, data.Name)
+	if err != nil {
+		http.Error(w, "send Mailing List Email error", http.StatusBadRequest)
+		return
+	}
+
+	_, err = w.Write([]byte(`{"status":"ok"}`))
+	if err != nil {
+		return
+	}
+}
+
+func getGoogleData(oauthReq OAuthRequest) (OAuthResponse, error) {
 	// Use Google OAuth token to fetch user profile information
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", "https://www.googleapis.com/oauth2/v3/tokeninfo?id_token="+oauthReq.Token, nil)
 	if err != nil {
-		http.Error(w, "Failed to create request", http.StatusInternalServerError)
-		return
+		return OAuthResponse{}, err
 	}
 
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		http.Error(w, "Failed to fetch Google user info", http.StatusUnauthorized)
-		return
+		return OAuthResponse{}, err
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		http.Error(w, "Failed to read response body", http.StatusInternalServerError)
-		return
+		return OAuthResponse{}, err
 	}
 
 	var userInfo map[string]interface{}
 	if err := json.Unmarshal(body, &userInfo); err != nil {
-		http.Error(w, "Failed to parse user info", http.StatusInternalServerError)
-		return
+		return OAuthResponse{}, err
 	}
 
-	if email, ok := userInfo["email"].(string); ok {
-		// Handle the case where email is missing
-		if email == "" {
-			log.Printf("Warning: Email not provided by Google for user: %s", userInfo["name"].(string))
-			http.Error(w, `{"error":"Email is required but was not provided by Google. Please ensure email permission is granted."}`, http.StatusBadRequest)
-			return
-		}
-
-		doMailingListSignUp(req.Context(), email, userInfo["name"].(string))
+	// Assuming userInfo is a map[string]interface{}
+	email, ok := userInfo["email"].(string)
+	if !ok {
+		return OAuthResponse{}, fmt.Errorf("could not parse email from user info")
 	}
 
-	log.Printf("User Info: %v", userInfo)
+	name, ok := userInfo["name"].(string)
+	if !ok {
+		return OAuthResponse{}, fmt.Errorf("could not parse name from user info")
+	}
 
-	json.NewEncoder(w).Encode(userInfo)
+	pictureUrl, ok := userInfo["picture"].(string)
+	if !ok {
+		return OAuthResponse{}, fmt.Errorf("could not parse picture URL from user info")
+	}
+
+	// Construct the OAuthResponse with validated data
+	return OAuthResponse{
+		ID:    email,
+		Name:  name,
+		Email: email,
+		Picture: struct {
+			Data struct {
+				Url string `json:"url"`
+			} `json:"data"`
+		}{
+			Data: struct {
+				Url string `json:"url"`
+			}{
+				Url: pictureUrl,
+			},
+		},
+	}, nil
 }
 
 func handleOAuthFacebook(w http.ResponseWriter, r *http.Request) {
@@ -240,86 +327,92 @@ func handleOAuthFacebook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Received Facebook OAuth token: %s", oauthReq.Token)
+	userInfo, err := getFBData(oauthReq)
+	if err != nil {
+		log.Printf("error getting FB data : %v", err)
+		http.Error(w, "error getting FB data", http.StatusInternalServerError)
+		return
+	}
 
+	err = doMailingListSignUp(r.Context(), userInfo.Email, userInfo.Name)
+	if err != nil {
+		log.Printf("send Mailing List Email error for %s : %v", userInfo.Email, err)
+		http.Error(w, "send Mailing List Email error", http.StatusBadRequest)
+		return
+	}
+
+	_, err = w.Write([]byte(`{"status":"ok"}`))
+	if err != nil {
+		return
+	}
+}
+
+func getFBData(oauthReq OAuthRequest) (OAuthResponse, error) {
 	// Use Facebook OAuth token to fetch user profile information
 	client := &http.Client{}
-	url := fmt.Sprintf("https://graph.facebook.com/me?fields=id,name,email,picture&access_token=%s", oauthReq.Token)
+	oAuthURL := fmt.Sprintf("https://graph.facebook.com/me?fields=id,name,email,picture&access_token=%s", oauthReq.Token)
 
-	resp, err := client.Get(url)
+	resp, err := client.Get(oAuthURL)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		http.Error(w, "Failed to fetch Facebook user info", http.StatusInternalServerError)
-		return
+		return OAuthResponse{}, err
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		http.Error(w, "Failed to read response body", http.StatusInternalServerError)
-		return
+		return OAuthResponse{}, err
 	}
 
 	var userInfo OAuthResponse
 	if err := json.Unmarshal(body, &userInfo); err != nil {
-		http.Error(w, "Failed to parse user info", http.StatusInternalServerError)
-		return
+		return OAuthResponse{}, err
 	}
-
-	// Handle the case where email is missing
-	if userInfo.Email == "" {
-		log.Printf("Warning: Email not provided by Facebook for user: %s", userInfo.Name)
-		http.Error(w, `{"error":"Email is required but was not provided by Facebook. Please ensure email permission is granted."}`, http.StatusBadRequest)
-		return
-	}
-
-	doMailingListSignUp(r.Context(), userInfo.Email, userInfo.Name)
-
-	log.Printf("User Info: %+v", userInfo)
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(userInfo)
+	return userInfo, nil
 }
 
-func doMailingListSignUp(ctx context.Context, email string, name string) {
+func doMailingListSignUp(ctx context.Context, email string, name string) error {
+	if email == "" {
+		return fmt.Errorf("email is empty")
+	}
 	if !isOnMailingList(ctx, email) {
-
-		subject := "Welcome to the list"
-		text := "Welcome to our mailing list! Here is your link to the pattern library: http://example.com/pattern-library"
-		sendEmail(ctx, email, subject, text)
-		addToMailingList(ctx, email, name)
+		err := sendTemplateEmail(ctx, welcomeEmailTemplateName, welcomeEmailTemplateSubject, email, nil)
+		if err != nil {
+			return fmt.Errorf("sending '%s' to %s <%s> failed: %v", welcomeEmailTemplateName, name, email, err)
+		}
+		err = addToMailingList(ctx, email, name)
+		if err != nil {
+			return fmt.Errorf("addding %s <%s> to mailing list failed: %v", name, email, err)
+		}
+	} else {
+		return fmt.Errorf("email is already on the list : %s", email)
 	}
+	return nil
 }
 
-func sendEmail(ctx context.Context, to string, subject string, text string) {
-	mailgunURL := fmt.Sprintf("https://api.mailgun.net/v3/%s/messages", mailgunDomain)
-
-	from := fmt.Sprintf("stevenlawton.com <mailinglist@%s>", mailgunDomain)
-	subject = fmt.Sprintf("stevenlawton.com: %s", subject)
-	data := url.Values{}
-	data.Set("from", from)
-	data.Set("to", to)
-	data.Set("subject", subject)
-	data.Set("text", text)
-
-	req, err := http.NewRequest("POST", mailgunURL, strings.NewReader(data.Encode()))
+func sendTemplateEmail(ctx context.Context, template string, subject string, to string, variables map[string]string) error {
+	mg := mailgun.NewMailgun(mailgunDomain, mailgunListAPIKey)
+	t, err := mg.GetTemplate(ctx, template)
 	if err != nil {
-		log.Printf("Failed to create request: %v", err)
-		return
-	}
-	req.SetBasicAuth("api", mailgunAPIKey)
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	defer resp.Body.Close()
-	if err != nil || resp.StatusCode != http.StatusOK {
-		all, _ := io.ReadAll(resp.Body)
-
-		log.Printf("Failed to send email: %v, %s", err, string(all))
-		return
+		return err
 	}
 
-	log.Printf("Email sent successfully to %s", to)
+	message := mailgun.NewMessage(mailgunSender, mailgunSubjectPrefix+subject, "", to)
+	message.SetTemplate(t.Name)
+	if variables != nil {
+		for key, val := range variables {
+			err := message.AddTemplateVariable(key, val)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	msg, id, err := mg.Send(ctx, message)
+	if err != nil {
+		return err
+	}
+	log.Printf("%s -> msg: %s", id, msg)
+	return nil
 }
 
 func isOnMailingList(ctx context.Context, email string) bool {
@@ -332,14 +425,7 @@ func isOnMailingList(ctx context.Context, email string) bool {
 	return true
 }
 
-func addToMailingList(ctx context.Context, email string, name string) {
-	mailgunListAPIKey := os.Getenv("MAILGUN_MAILING_LIST_API_KEY")
-	if mailgunListAPIKey == "" {
-		log.Printf("Mailgun API key not set")
-		return
-	}
-
-	mailgunListAddress := "mailinglist@mail.stevenlawton.com"
+func addToMailingList(ctx context.Context, email string, name string) error {
 	mailgunURL := fmt.Sprintf("https://api.mailgun.net/v3/lists/%s/members", mailgunListAddress)
 
 	data := url.Values{}
@@ -351,7 +437,7 @@ func addToMailingList(ctx context.Context, email string, name string) {
 	req, err := http.NewRequest("POST", mailgunURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		log.Printf("Failed to create request to add member to mailing list: %v", err)
-		return
+		return err
 	}
 	req.SetBasicAuth("api", mailgunListAPIKey)
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
@@ -360,11 +446,12 @@ func addToMailingList(ctx context.Context, email string, name string) {
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		log.Printf("Failed to add member to mailing list: %v", err)
-		return
+		return err
 	}
 	defer resp.Body.Close()
 
 	b, _ := io.ReadAll(resp.Body)
 
 	log.Printf("Successfully added %s to the mailing list %s", email, string(b))
+	return nil
 }
