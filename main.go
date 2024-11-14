@@ -12,10 +12,8 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -188,7 +186,7 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Received signup request for email: %s", signupReq.Email)
 	if !isOnMailingList(r.Context(), signupReq.Email) {
-		value := fmt.Sprintf(`%s/verify?token=%s&email=%s`, baseURL, calculateToken(signupReq.Email), signupReq.Email)
+		value := fmt.Sprintf(`%s:%s/api/verify?token=%s&email=%s`, baseURL, port, calculateToken(signupReq.Email), signupReq.Email)
 		params := map[string]string{
 			"validation_email_link": value,
 		}
@@ -426,32 +424,17 @@ func isOnMailingList(ctx context.Context, email string) bool {
 }
 
 func addToMailingList(ctx context.Context, email string, name string) error {
-	mailgunURL := fmt.Sprintf("https://api.mailgun.net/v3/lists/%s/members", mailgunListAddress)
-
-	data := url.Values{}
-	data.Set("address", email)
-	data.Set("name", name)
-	data.Set("subscribed", "true")
-	data.Set("upsert", "true")
-
-	req, err := http.NewRequest("POST", mailgunURL, strings.NewReader(data.Encode()))
+	mg := mailgun.NewMailgun(mailgunDomain, mailgunListAPIKey)
+	err := mg.CreateMember(ctx, true, mailgunListAddress,
+		mailgun.Member{
+			Address:    email,
+			Name:       name,
+			Subscribed: mailgun.Subscribed,
+		})
 	if err != nil {
-		log.Printf("Failed to create request to add member to mailing list: %v", err)
 		return err
 	}
-	req.SetBasicAuth("api", mailgunListAPIKey)
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		log.Printf("Failed to add member to mailing list: %v", err)
-		return err
-	}
-	defer resp.Body.Close()
-
-	b, _ := io.ReadAll(resp.Body)
-
-	log.Printf("Successfully added %s to the mailing list %s", email, string(b))
+	log.Printf("Successfully added %s to the mailing list %s", email, mailgunListAddress)
 	return nil
 }
