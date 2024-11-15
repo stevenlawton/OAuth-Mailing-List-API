@@ -63,7 +63,7 @@ func setup() {
 	currentDir, err := os.Getwd()
 
 	if err := godotenv.Load(currentDir + "/.env"); err != nil {
-		log.Println("FATAL: No .env file found")
+		log.Println("INFO: No .env file found")
 	} else {
 		log.Println("INFO: .env file loaded successfully")
 	}
@@ -165,16 +165,10 @@ func main() {
 		log.Fatalf("FATAL: Failed to create TeleLogger: %v", err)
 	}
 
-	http.HandleFunc("/api/signup", handleSignup)
-	http.HandleFunc("/api/verify", handleSignupVerify)
-	http.HandleFunc("/api/oauth/google", handleOAuthGoogle)
-	http.HandleFunc("/api/oauth/facebook", handleOAuthFacebook)
-
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("Received a request to root path")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Hello, this is the Go server response."))
-	})
+	http.HandleFunc("/mail/api/signup", handleSignup)
+	http.HandleFunc("/mail/api/verify", handleSignupVerify)
+	http.HandleFunc("/mail/api/oauth/google", handleOAuthGoogle)
+	http.HandleFunc("/mail/api/oauth/facebook", handleOAuthFacebook)
 
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{corsOrigin},
