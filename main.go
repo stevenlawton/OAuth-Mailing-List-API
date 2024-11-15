@@ -212,7 +212,12 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 		err := sendTemplateEmail(ctx, validationEmailTemplateName, validationEmailTemplateSubject, signupReq.Email, params)
 		if err != nil {
 			log.Printf("ERROR: failed to send template email: %s to %s [%v] :: %v", validationEmailTemplateName, signupReq.Email, params, err)
-			http.Error(w, "send Template Email error", http.StatusBadRequest)
+			http.Error(w, "Send Template Email error:", http.StatusBadRequest)
+			return
+		}
+	} else {
+		_, err := w.Write([]byte(`{"status":"all ready on list"}`))
+		if err != nil {
 			return
 		}
 	}
