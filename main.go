@@ -241,10 +241,9 @@ func handleSignupVerify(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Printf("INFO: Email verification completed request for email: %s", email)
-		_, err = w.Write([]byte(`{"status":"ok"}`))
-		if err != nil {
-			return
-		}
+
+		http.Redirect(w, r, "https://stevenlawton.com/", http.StatusOK)
+
 		return
 	}
 	http.Error(w, "Invalid request", http.StatusBadRequest)
