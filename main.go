@@ -203,7 +203,7 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("INFO: Received signup request for email: %s", signupReq.Email)
 	if !isOnMailingList(r.Context(), signupReq.Email) {
-		value := fmt.Sprintf(`%s:%s/api/verify?token=%s&email=%s`, baseURL, port, calculateToken(signupReq.Email), signupReq.Email)
+		value := fmt.Sprintf(`%sapi/verify?token=%s&email=%s`, baseURL, calculateToken(signupReq.Email), signupReq.Email)
 		params := map[string]string{
 			"validation_email_link": value,
 		}
@@ -355,10 +355,10 @@ func handleOAuthFacebook(w http.ResponseWriter, r *http.Request) {
 	err = doMailingListSignUp(r.Context(), userInfo.Email, userInfo.Name)
 	if err != nil {
 		log.Printf("ERROR: (fb) failed to send email to %s :: %v", userInfo.Email, err)
-		http.Error(w, "send Mailing List Email error", http.StatusBadRequest)
+		http.Error(w, "ERROR:Email error: ["+err.Error()+"], try an alternative method or try again later?", http.StatusBadRequest)
 		return
 	}
-	log.Printf("INFO: (FB) email added: %s", userInfo.Email)
+	log.Printf("INFO: (fb) email added: %s", userInfo.Email)
 	_, err = w.Write([]byte(`{"status":"ok"}`))
 	if err != nil {
 		return
